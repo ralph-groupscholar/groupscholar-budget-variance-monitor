@@ -1,2 +1,3 @@
 /bin/
 /out/
+/tests/out*.txt

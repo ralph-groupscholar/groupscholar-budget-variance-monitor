@@ -9,6 +9,13 @@ program gs_budget_variance_monitor
     real(real64) :: actual = 0.0_real64
   end type summary_item
 
+  type :: variance_item
+    character(len=12) :: group_type = ""
+    character(len=40) :: key = ""
+    real(real64) :: planned = 0.0_real64
+    real(real64) :: actual = 0.0_real64
+  end type variance_item
+
   type(summary_item), dimension(max_items) :: month_summary
   type(summary_item), dimension(max_items) :: program_summary
   integer :: month_count, program_count
@@ -187,6 +194,11 @@ contains
     integer, intent(in) :: program_count
     real(real64), intent(in) :: total_plan
     real(real64), intent(in) :: total_act
+    integer :: month_alerts, program_alerts, total_alerts
+    integer :: month_total, program_total
+    integer :: total_groups
+    integer :: variance_count
+    type(variance_item), dimension(max_items * 2) :: variance_list
 
     write(*, '(a)') 'Budget Variance Monitor'
     write(*, '(a)') 'Input file: ' // trim(csv_file)
@@ -204,9 +216,146 @@ contains
     call print_summary_rows(program_list, program_count, threshold, amount_threshold)
     write(*, '(a)') ''
 
+    call count_alerts(month_list, month_count, threshold, amount_threshold, month_alerts, month_total)
+    call count_alerts(program_list, program_count, threshold, amount_threshold, program_alerts, program_total)
+    total_alerts = month_alerts + program_alerts
+    total_groups = month_total + program_total
+
+    write(*, '(a)') 'Alert Summary'
+    write(*, '(a, i3, a, i3)') 'Monthly alerts: ', month_alerts, ' / ', month_total
+    write(*, '(a, i3, a, i3)') 'Program alerts: ', program_alerts, ' / ', program_total
+    write(*, '(a, i3, a, i3)') 'Total alerts: ', total_alerts, ' / ', total_groups
+    write(*, '(a)') ''
+
+    call build_variance_list(month_list, month_count, program_list, program_count, variance_list, variance_count)
+    call sort_variances(variance_list, variance_count)
+    call print_top_variances(variance_list, variance_count, threshold, amount_threshold)
+    write(*, '(a)') ''
+
     write(*, '(a)') 'Overall Totals'
     call print_total_row(total_plan, total_act, threshold, amount_threshold)
   end subroutine print_report
+
+  subroutine count_alerts(list, count, threshold, amount_threshold, alert_count, total_count)
+    type(summary_item), dimension(:), intent(in) :: list
+    integer, intent(in) :: count
+    real(real64), intent(in) :: threshold
+    real(real64), intent(in) :: amount_threshold
+    integer, intent(out) :: alert_count
+    integer, intent(out) :: total_count
+    real(real64) :: variance
+    real(real64) :: variance_pct
+    integer :: i
+
+    alert_count = 0
+    total_count = count
+    do i = 1, count
+      variance = list(i)%actual - list(i)%planned
+      if (list(i)%planned /= 0.0_real64) then
+        variance_pct = variance / list(i)%planned
+      else
+        variance_pct = 0.0_real64
+      end if
+      if (should_alert(variance, variance_pct, threshold, amount_threshold)) then
+        alert_count = alert_count + 1
+      end if
+    end do
+  end subroutine count_alerts
+
+  subroutine build_variance_list(month_list, month_count, program_list, program_count, out_list, out_count)
+    type(summary_item), dimension(:), intent(in) :: month_list
+    type(summary_item), dimension(:), intent(in) :: program_list
+    integer, intent(in) :: month_count
+    integer, intent(in) :: program_count
+    type(variance_item), dimension(:), intent(out) :: out_list
+    integer, intent(out) :: out_count
+    integer :: i
+
+    out_count = 0
+    do i = 1, month_count
+      out_count = out_count + 1
+      out_list(out_count)%group_type = 'month'
+      out_list(out_count)%key = month_list(i)%key
+      out_list(out_count)%planned = month_list(i)%planned
+      out_list(out_count)%actual = month_list(i)%actual
+    end do
+
+    do i = 1, program_count
+      out_count = out_count + 1
+      out_list(out_count)%group_type = 'program'
+      out_list(out_count)%key = program_list(i)%key
+      out_list(out_count)%planned = program_list(i)%planned
+      out_list(out_count)%actual = program_list(i)%actual
+    end do
+  end subroutine build_variance_list
+
+  subroutine sort_variances(list, count)
+    type(variance_item), dimension(:), intent(inout) :: list
+    integer, intent(in) :: count
+    integer :: i, j
+    type(variance_item) :: temp
+    real(real64) :: var_i, var_j
+
+    do i = 1, count - 1
+      do j = i + 1, count
+        var_i = abs(list(i)%actual - list(i)%planned)
+        var_j = abs(list(j)%actual - list(j)%planned)
+        if (var_j > var_i) then
+          temp = list(i)
+          list(i) = list(j)
+          list(j) = temp
+        else if (abs(var_j - var_i) < 0.000001_real64) then
+          if (trim(list(j)%group_type) < trim(list(i)%group_type)) then
+            temp = list(i)
+            list(i) = list(j)
+            list(j) = temp
+          else if (trim(list(j)%group_type) == trim(list(i)%group_type)) then
+            if (trim(list(j)%key) < trim(list(i)%key)) then
+              temp = list(i)
+              list(i) = list(j)
+              list(j) = temp
+            end if
+          end if
+        end if
+      end do
+    end do
+  end subroutine sort_variances
+
+  subroutine print_top_variances(list, count, threshold, amount_threshold)
+    type(variance_item), dimension(:), intent(in) :: list
+    integer, intent(in) :: count
+    real(real64), intent(in) :: threshold
+    real(real64), intent(in) :: amount_threshold
+    integer :: i
+    integer :: limit
+    real(real64) :: variance
+    real(real64) :: variance_pct
+    character(len=6) :: status
+
+    limit = count
+    if (limit > 5) limit = 5
+
+    write(*, '(a)') 'Top Variances'
+    write(*, '(a)') 'Group | Key | Planned | Actual | Variance | Variance % | Status'
+
+    do i = 1, limit
+      variance = list(i)%actual - list(i)%planned
+      if (list(i)%planned /= 0.0_real64) then
+        variance_pct = variance / list(i)%planned
+      else
+        variance_pct = 0.0_real64
+      end if
+
+      if (should_alert(variance, variance_pct, threshold, amount_threshold)) then
+        status = 'ALERT'
+      else
+        status = 'OK'
+      end if
+
+      write(*, '(a, " | ", a, " | ", f10.2, " | ", f10.2, " | ", f10.2, " | ", f10.3, " | ", a)') &
+        trim(list(i)%group_type), trim(list(i)%key), list(i)%planned, list(i)%actual, variance, variance_pct, trim(status)
+    end do
+  end subroutine print_top_variances
 
   subroutine print_summary_rows(list, count, threshold, amount_threshold)
     type(summary_item), dimension(:), intent(in) :: list

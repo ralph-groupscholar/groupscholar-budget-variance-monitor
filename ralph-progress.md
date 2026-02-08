@@ -9,3 +9,5 @@
 - Rebuilt Fortran CLI to produce monthly and program summaries with deterministic output.
 - Added Makefile, tests, and updated expected output for the new report format.
 - Implemented DB logging SQL generation and refreshed production schema/seed data.
+- Added alert summary counts and top-variance ranking sections to the CLI output.
+- Added alert-focused fixtures and tests for threshold breaches.

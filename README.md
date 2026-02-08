@@ -6,6 +6,7 @@ Budget variance monitor is a Fortran CLI that compares planned vs. actual award 
 - CSV ingestion for planned vs. actual awards
 - Monthly and program-level aggregation
 - Variance percentage alerting with configurable threshold
+- Alert summary counts and top variance ranking
 - Optional production DB logging for run history and variance rows
 - Deterministic, testable output
 
@@ -53,3 +54,9 @@ make test
 - Fortran (gfortran)
 - PostgreSQL (optional logging via `psql`)
 - Make
+
+## Additional Scenarios
+Run the alert-focused fixture:
+```bash
+bin/gs-budget-variance-monitor data/sample_awards_alerts.csv config/alerts.cfg
+```

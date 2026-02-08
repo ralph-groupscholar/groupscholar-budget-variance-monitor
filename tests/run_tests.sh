@@ -1,10 +1,15 @@
-#!/bin/sh
-set -eu
+#!/bin/bash
+set -euo pipefail
 
-ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
-OUT_FILE="$ROOT_DIR/out/test_output.txt"
-
+ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT_DIR"
-./bin/gs-budget-variance-monitor data/sample_awards.csv config/default.cfg > "$OUT_FILE"
 
-diff -u "$ROOT_DIR/tests/expected.txt" "$OUT_FILE"
+make build >/dev/null
+
+bin/gs-budget-variance-monitor data/sample_awards.csv config/default.cfg > tests/out.txt
+
+diff -u tests/expected.txt tests/out.txt
+
+./tests/run_alerts.sh
+
+echo "All tests passed."
