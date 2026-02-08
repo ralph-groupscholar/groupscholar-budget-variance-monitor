@@ -28,5 +28,17 @@ program | Arts |   17500.00 |   18100.00 |     600.00 |      0.034 | OK
 month | 2026-03 |   27000.00 |   26600.00 |    -400.00 |     -0.015 | OK
 program | Health |   18500.00 |   18900.00 |     400.00 |      0.022 | OK
 
+Top Month Variances
+Group | Key | Planned | Actual | Variance | Variance % | Status
+month | 2026-02 |   25000.00 |   25700.00 |     700.00 |      0.028 | OK
+month | 2026-03 |   27000.00 |   26600.00 |    -400.00 |     -0.015 | OK
+month | 2026-01 |   25000.00 |   25000.00 |       0.00 |      0.000 | OK
+
+Top Program Variances
+Group | Key | Planned | Actual | Variance | Variance % | Status
+program | STEM |   41000.00 |   40300.00 |    -700.00 |     -0.017 | OK
+program | Arts |   17500.00 |   18100.00 |     600.00 |      0.034 | OK
+program | Health |   18500.00 |   18900.00 |     400.00 |      0.022 | OK
+
 Overall Totals
 Total |   77000.00 |   77300.00 |     300.00 |      0.004 | OK

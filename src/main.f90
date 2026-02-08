@@ -29,6 +29,7 @@ program gs_budget_variance_monitor
   real(real64) :: planned_amount, actual_amount
   real(real64) :: variance_threshold
   real(real64) :: variance_amount_threshold
+  integer :: top_variance_limit
   real(real64) :: total_planned, total_actual
 
   call get_command_argument(1, csv_path)
@@ -39,7 +40,7 @@ program gs_budget_variance_monitor
     stop 1
   end if
 
-  call read_config(trim(cfg_path), variance_threshold, variance_amount_threshold)
+  call read_config(trim(cfg_path), variance_threshold, variance_amount_threshold, top_variance_limit)
   month_count = 0
   program_count = 0
   total_planned = 0.0_real64
@@ -76,7 +77,8 @@ program gs_budget_variance_monitor
   call sort_summary(month_summary, month_count)
   call sort_summary(program_summary, program_count)
 
-  call print_report(trim(csv_path), variance_threshold, variance_amount_threshold, month_summary, month_count, &
+  call print_report(trim(csv_path), variance_threshold, variance_amount_threshold, top_variance_limit, month_summary, &
+                    month_count, &
                     program_summary, program_count, total_planned, total_actual)
   call maybe_log_to_db(trim(csv_path), variance_threshold, variance_amount_threshold, month_summary, month_count, &
                        program_summary, program_count, total_planned, total_actual)
@@ -87,16 +89,18 @@ contains
     write(*, '(a)') 'Usage: gs-budget-variance-monitor <awards.csv> <config.cfg>'
   end subroutine print_usage
 
-  subroutine read_config(cfg_file, pct_threshold, amount_threshold)
+  subroutine read_config(cfg_file, pct_threshold, amount_threshold, top_limit)
     character(len=*), intent(in) :: cfg_file
     real(real64), intent(out) :: pct_threshold
     real(real64), intent(out) :: amount_threshold
+    integer, intent(out) :: top_limit
     character(len=256) :: cfg_line
     character(len=128) :: key
     character(len=128) :: value
     integer :: unit, ios, eq_pos
     pct_threshold = 0.0_real64
     amount_threshold = 0.0_real64
+    top_limit = 5
 
     open(newunit=unit, file=cfg_file, status='old', action='read', iostat=ios)
     if (ios /= 0) then
@@ -120,11 +124,16 @@ contains
       case ('variance_amount_threshold')
         read(value, *, iostat=ios) amount_threshold
         if (ios /= 0) amount_threshold = 0.0_real64
+      case ('top_variance_limit')
+        read(value, *, iostat=ios) top_limit
+        if (ios /= 0) top_limit = 5
       case default
         cycle
       end select
     end do
     close(unit)
+
+    if (top_limit < 1) top_limit = 1
   end subroutine read_config
 
   subroutine parse_csv_line(csv_line, date_out, program_out, planned_out, actual_out)
@@ -183,11 +192,12 @@ contains
     end do
   end subroutine sort_summary
 
-  subroutine print_report(csv_file, threshold, amount_threshold, month_list, month_count, program_list, &
+  subroutine print_report(csv_file, threshold, amount_threshold, top_limit, month_list, month_count, program_list, &
                           program_count, total_plan, total_act)
     character(len=*), intent(in) :: csv_file
     real(real64), intent(in) :: threshold
     real(real64), intent(in) :: amount_threshold
+    integer, intent(in) :: top_limit
     type(summary_item), dimension(:), intent(in) :: month_list
     type(summary_item), dimension(:), intent(in) :: program_list
     integer, intent(in) :: month_count
@@ -229,7 +239,14 @@ contains
 
     call build_variance_list(month_list, month_count, program_list, program_count, variance_list, variance_count)
     call sort_variances(variance_list, variance_count)
-    call print_top_variances(variance_list, variance_count, threshold, amount_threshold)
+    call print_top_variances(variance_list, variance_count, threshold, amount_threshold, top_limit, 'all', &
+                             'Top Variances')
+    write(*, '(a)') ''
+    call print_top_variances(variance_list, variance_count, threshold, amount_threshold, top_limit, 'month', &
+                             'Top Month Variances')
+    write(*, '(a)') ''
+    call print_top_variances(variance_list, variance_count, threshold, amount_threshold, top_limit, 'program', &
+                             'Top Program Variances')
     write(*, '(a)') ''
 
     write(*, '(a)') 'Overall Totals'
@@ -321,24 +338,29 @@ contains
     end do
   end subroutine sort_variances
 
-  subroutine print_top_variances(list, count, threshold, amount_threshold)
+  subroutine print_top_variances(list, count, threshold, amount_threshold, limit, filter_type, title)
     type(variance_item), dimension(:), intent(in) :: list
     integer, intent(in) :: count
     real(real64), intent(in) :: threshold
     real(real64), intent(in) :: amount_threshold
+    integer, intent(in) :: limit
+    character(len=*), intent(in) :: filter_type
+    character(len=*), intent(in) :: title
     integer :: i
-    integer :: limit
+    integer :: printed
     real(real64) :: variance
     real(real64) :: variance_pct
     character(len=6) :: status
 
-    limit = count
-    if (limit > 5) limit = 5
-
-    write(*, '(a)') 'Top Variances'
+    write(*, '(a)') trim(title)
     write(*, '(a)') 'Group | Key | Planned | Actual | Variance | Variance % | Status'
 
-    do i = 1, limit
+    printed = 0
+    do i = 1, count
+      if (trim(filter_type) /= 'all') then
+        if (trim(list(i)%group_type) /= trim(filter_type)) cycle
+      end if
+
       variance = list(i)%actual - list(i)%planned
       if (list(i)%planned /= 0.0_real64) then
         variance_pct = variance / list(i)%planned
@@ -354,6 +376,9 @@ contains
 
       write(*, '(a, " | ", a, " | ", f10.2, " | ", f10.2, " | ", f10.2, " | ", f10.3, " | ", a)') &
         trim(list(i)%group_type), trim(list(i)%key), list(i)%planned, list(i)%actual, variance, variance_pct, trim(status)
+
+      printed = printed + 1
+      if (printed >= limit) exit
     end do
   end subroutine print_top_variances
 

@@ -11,3 +11,5 @@
 - Implemented DB logging SQL generation and refreshed production schema/seed data.
 - Added alert summary counts and top-variance ranking sections to the CLI output.
 - Added alert-focused fixtures and tests for threshold breaches.
+- Added configurable top-variance limit and separate top variance sections for overall/month/program.
+- Updated configs, README, and refreshed golden-output tests for the new report sections.
