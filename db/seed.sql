@@ -1,7 +1,7 @@
 SET search_path TO groupscholar_budget_variance_monitor, public;
 
-INSERT INTO runs (input_file, variance_threshold, total_planned, total_actual)
-VALUES ('data/sample_awards.csv', 0.10, 77000.00, 77300.00);
+INSERT INTO runs (input_file, variance_threshold, variance_amount_threshold, total_planned, total_actual)
+VALUES ('data/sample_awards.csv', 0.10, 1000.00, 77000.00, 77300.00);
 
 INSERT INTO variances (run_id, group_type, group_key, planned_amount, actual_amount, variance_amount, variance_pct, status)
 VALUES

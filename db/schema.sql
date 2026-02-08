@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS groupscholar_budget_variance_monitor.runs (
   run_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   input_file TEXT NOT NULL,
   variance_threshold NUMERIC(10,4) NOT NULL,
+  variance_amount_threshold NUMERIC(14,2) NOT NULL DEFAULT 0.00,
   total_planned NUMERIC(14,2) NOT NULL,
   total_actual NUMERIC(14,2) NOT NULL
 );

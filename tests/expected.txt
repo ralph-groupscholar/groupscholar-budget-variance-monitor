@@ -1,6 +1,7 @@
 Budget Variance Monitor
 Input file: data/sample_awards.csv
 Variance threshold:   0.10
+Variance amount threshold:    1000.00
 
 Monthly Summary
 Month | Planned | Actual | Variance | Variance % | Status

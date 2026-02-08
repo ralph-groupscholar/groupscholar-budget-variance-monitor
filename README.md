@@ -32,6 +32,7 @@ bin/gs-budget-variance-monitor data/sample_awards.csv config/default.cfg
 ## Configuration
 `config/default.cfg` contains:
 - `variance_threshold`: decimal percentage (0.10 = 10%)
+- `variance_amount_threshold`: absolute variance amount that triggers alerts (0 disables)
 
 ## Output
 The CLI prints a monthly summary, program summary, and overall totals to stdout in a deterministic order.

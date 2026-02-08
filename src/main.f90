@@ -21,6 +21,7 @@ program gs_budget_variance_monitor
   character(len=7) :: month_key
   real(real64) :: planned_amount, actual_amount
   real(real64) :: variance_threshold
+  real(real64) :: variance_amount_threshold
   real(real64) :: total_planned, total_actual
 
   call get_command_argument(1, csv_path)
@@ -31,7 +32,7 @@ program gs_budget_variance_monitor
     stop 1
   end if
 
-  variance_threshold = read_threshold(trim(cfg_path))
+  call read_config(trim(cfg_path), variance_threshold, variance_amount_threshold)
   month_count = 0
   program_count = 0
   total_planned = 0.0_real64
@@ -68,9 +69,9 @@ program gs_budget_variance_monitor
   call sort_summary(month_summary, month_count)
   call sort_summary(program_summary, program_count)
 
-  call print_report(trim(csv_path), variance_threshold, month_summary, month_count, &
+  call print_report(trim(csv_path), variance_threshold, variance_amount_threshold, month_summary, month_count, &
                     program_summary, program_count, total_planned, total_actual)
-  call maybe_log_to_db(trim(csv_path), variance_threshold, month_summary, month_count, &
+  call maybe_log_to_db(trim(csv_path), variance_threshold, variance_amount_threshold, month_summary, month_count, &
                        program_summary, program_count, total_planned, total_actual)
 
 contains
@@ -79,11 +80,16 @@ contains
     write(*, '(a)') 'Usage: gs-budget-variance-monitor <awards.csv> <config.cfg>'
   end subroutine print_usage
 
-  real(real64) function read_threshold(cfg_file)
+  subroutine read_config(cfg_file, pct_threshold, amount_threshold)
     character(len=*), intent(in) :: cfg_file
+    real(real64), intent(out) :: pct_threshold
+    real(real64), intent(out) :: amount_threshold
     character(len=256) :: cfg_line
+    character(len=128) :: key
+    character(len=128) :: value
     integer :: unit, ios, eq_pos
-    read_threshold = 0.0_real64
+    pct_threshold = 0.0_real64
+    amount_threshold = 0.0_real64
 
     open(newunit=unit, file=cfg_file, status='old', action='read', iostat=ios)
     if (ios /= 0) then
@@ -91,16 +97,28 @@ contains
       stop 1
     end if
 
-    read(unit, '(A)', iostat=ios) cfg_line
-    if (ios == 0) then
+    do
+      read(unit, '(A)', iostat=ios) cfg_line
+      if (ios /= 0) exit
+      if (len_trim(cfg_line) == 0) cycle
+      if (cfg_line(1:1) == '#') cycle
       eq_pos = index(cfg_line, '=')
-      if (eq_pos > 0) then
-        read(cfg_line(eq_pos+1:), *, iostat=ios) read_threshold
-        if (ios /= 0) read_threshold = 0.0_real64
-      end if
-    end if
+      if (eq_pos <= 0) cycle
+      key = adjustl(cfg_line(1:eq_pos-1))
+      value = adjustl(cfg_line(eq_pos+1:))
+      select case (trim(key))
+      case ('variance_threshold')
+        read(value, *, iostat=ios) pct_threshold
+        if (ios /= 0) pct_threshold = 0.0_real64
+      case ('variance_amount_threshold')
+        read(value, *, iostat=ios) amount_threshold
+        if (ios /= 0) amount_threshold = 0.0_real64
+      case default
+        cycle
+      end select
+    end do
     close(unit)
-  end function read_threshold
+  end subroutine read_config
 
   subroutine parse_csv_line(csv_line, date_out, program_out, planned_out, actual_out)
     character(len=*), intent(in) :: csv_line
@@ -158,10 +176,11 @@ contains
     end do
   end subroutine sort_summary
 
-  subroutine print_report(csv_file, threshold, month_list, month_count, program_list, &
+  subroutine print_report(csv_file, threshold, amount_threshold, month_list, month_count, program_list, &
                           program_count, total_plan, total_act)
     character(len=*), intent(in) :: csv_file
     real(real64), intent(in) :: threshold
+    real(real64), intent(in) :: amount_threshold
     type(summary_item), dimension(:), intent(in) :: month_list
     type(summary_item), dimension(:), intent(in) :: program_list
     integer, intent(in) :: month_count
@@ -172,38 +191,41 @@ contains
     write(*, '(a)') 'Budget Variance Monitor'
     write(*, '(a)') 'Input file: ' // trim(csv_file)
     write(*, '(a, f6.2)') 'Variance threshold: ', threshold
+    write(*, '(a, f10.2)') 'Variance amount threshold: ', amount_threshold
     write(*, '(a)') ''
 
     write(*, '(a)') 'Monthly Summary'
     write(*, '(a)') 'Month | Planned | Actual | Variance | Variance % | Status'
-    call print_summary_rows(month_list, month_count, threshold)
+    call print_summary_rows(month_list, month_count, threshold, amount_threshold)
     write(*, '(a)') ''
 
     write(*, '(a)') 'Program Summary'
     write(*, '(a)') 'Program | Planned | Actual | Variance | Variance % | Status'
-    call print_summary_rows(program_list, program_count, threshold)
+    call print_summary_rows(program_list, program_count, threshold, amount_threshold)
     write(*, '(a)') ''
 
     write(*, '(a)') 'Overall Totals'
-    call print_total_row(total_plan, total_act, threshold)
+    call print_total_row(total_plan, total_act, threshold, amount_threshold)
   end subroutine print_report
 
-  subroutine print_summary_rows(list, count, threshold)
+  subroutine print_summary_rows(list, count, threshold, amount_threshold)
     type(summary_item), dimension(:), intent(in) :: list
     integer, intent(in) :: count
     real(real64), intent(in) :: threshold
+    real(real64), intent(in) :: amount_threshold
     integer :: i
 
     do i = 1, count
-      call print_row(list(i)%key, list(i)%planned, list(i)%actual, threshold)
+      call print_row(list(i)%key, list(i)%planned, list(i)%actual, threshold, amount_threshold)
     end do
   end subroutine print_summary_rows
 
-  subroutine print_row(key, planned, actual, threshold)
+  subroutine print_row(key, planned, actual, threshold, amount_threshold)
     character(len=*), intent(in) :: key
     real(real64), intent(in) :: planned
     real(real64), intent(in) :: actual
     real(real64), intent(in) :: threshold
+    real(real64), intent(in) :: amount_threshold
     real(real64) :: variance
     real(real64) :: variance_pct
     character(len=6) :: status
@@ -215,7 +237,7 @@ contains
       variance_pct = 0.0_real64
     end if
 
-    if (abs(variance_pct) > threshold) then
+    if (should_alert(variance, variance_pct, threshold, amount_threshold)) then
       status = 'ALERT'
     else
       status = 'OK'
@@ -225,10 +247,11 @@ contains
       trim(key), planned, actual, variance, variance_pct, trim(status)
   end subroutine print_row
 
-  subroutine print_total_row(planned, actual, threshold)
+  subroutine print_total_row(planned, actual, threshold, amount_threshold)
     real(real64), intent(in) :: planned
     real(real64), intent(in) :: actual
     real(real64), intent(in) :: threshold
+    real(real64), intent(in) :: amount_threshold
     real(real64) :: variance
     real(real64) :: variance_pct
     character(len=6) :: status
@@ -240,7 +263,7 @@ contains
       variance_pct = 0.0_real64
     end if
 
-    if (abs(variance_pct) > threshold) then
+    if (should_alert(variance, variance_pct, threshold, amount_threshold)) then
       status = 'ALERT'
     else
       status = 'OK'
@@ -250,10 +273,11 @@ contains
       'Total | ', planned, ' | ', actual, ' | ', variance, ' | ', variance_pct, ' | ', trim(status)
   end subroutine print_total_row
 
-  subroutine maybe_log_to_db(csv_file, threshold, month_list, month_count, program_list, &
+  subroutine maybe_log_to_db(csv_file, threshold, amount_threshold, month_list, month_count, program_list, &
                              program_count, total_plan, total_act)
     character(len=*), intent(in) :: csv_file
     real(real64), intent(in) :: threshold
+    real(real64), intent(in) :: amount_threshold
     type(summary_item), dimension(:), intent(in) :: month_list
     type(summary_item), dimension(:), intent(in) :: program_list
     integer, intent(in) :: month_count
@@ -281,16 +305,17 @@ contains
 
     write(unit, '(a)') 'BEGIN;'
     write(unit, '(a)') 'SET search_path TO ' // trim(db_schema) // ', public;'
-    write(unit, '(a)') 'INSERT INTO runs (input_file, variance_threshold, total_planned, total_actual)'
+    write(unit, '(a)') 'INSERT INTO runs (input_file, variance_threshold, variance_amount_threshold, total_planned, total_actual)'
     write(unit, '(a)') 'VALUES (''' // trim(csv_file) // ''', ' // trim(real_to_str(threshold)) // &
-      ', ' // trim(real_to_str(total_plan)) // ', ' // trim(real_to_str(total_act)) // ') RETURNING id \\\\gset'
+      ', ' // trim(real_to_str(amount_threshold)) // ', ' // trim(real_to_str(total_plan)) // &
+      ', ' // trim(real_to_str(total_act)) // ') RETURNING id \\\\gset'
 
     do i = 1, month_count
-      call write_variance_insert(unit, 'month', month_list(i), threshold)
+      call write_variance_insert(unit, 'month', month_list(i), threshold, amount_threshold)
     end do
 
     do i = 1, program_count
-      call write_variance_insert(unit, 'program', program_list(i), threshold)
+      call write_variance_insert(unit, 'program', program_list(i), threshold, amount_threshold)
     end do
 
     write(unit, '(a)') 'COMMIT;'
@@ -299,11 +324,12 @@ contains
     call execute_psql(trim(db_url), trim(sql_path))
   end subroutine maybe_log_to_db
 
-  subroutine write_variance_insert(unit, group_type, item, threshold)
+  subroutine write_variance_insert(unit, group_type, item, threshold, amount_threshold)
     integer, intent(in) :: unit
     character(len=*), intent(in) :: group_type
     type(summary_item), intent(in) :: item
     real(real64), intent(in) :: threshold
+    real(real64), intent(in) :: amount_threshold
     real(real64) :: variance
     real(real64) :: variance_pct
     character(len=6) :: status
@@ -315,7 +341,7 @@ contains
       variance_pct = 0.0_real64
     end if
 
-    if (abs(variance_pct) > threshold) then
+    if (should_alert(variance, variance_pct, threshold, amount_threshold)) then
       status = 'ALERT'
     else
       status = 'OK'
@@ -334,6 +360,21 @@ contains
     write(out, '(f12.6)') value
     out = adjustl(out)
   end function real_to_str
+
+  logical function should_alert(variance, variance_pct, pct_threshold, amount_threshold)
+    real(real64), intent(in) :: variance
+    real(real64), intent(in) :: variance_pct
+    real(real64), intent(in) :: pct_threshold
+    real(real64), intent(in) :: amount_threshold
+
+    if (abs(variance_pct) > pct_threshold) then
+      should_alert = .true.
+    else if (amount_threshold > 0.0_real64 .and. abs(variance) >= amount_threshold) then
+      should_alert = .true.
+    else
+      should_alert = .false.
+    end if
+  end function should_alert
 
   subroutine execute_psql(db_url, sql_path)
     character(len=*), intent(in) :: db_url
