@@ -208,6 +208,8 @@ contains
     integer :: month_total, program_total
     integer :: total_groups
     integer :: variance_count
+    integer :: over_count, under_count, even_count
+    real(real64) :: over_total, under_total
     type(variance_item), dimension(max_items * 2) :: variance_list
 
     write(*, '(a)') 'Budget Variance Monitor'
@@ -238,6 +240,14 @@ contains
     write(*, '(a)') ''
 
     call build_variance_list(month_list, month_count, program_list, program_count, variance_list, variance_count)
+    call summarize_direction(variance_list, variance_count, over_count, under_count, even_count, over_total, under_total)
+
+    write(*, '(a)') 'Direction Summary'
+    write(*, '(a, i3, a, f12.2)') 'Overspend groups: ', over_count, ' | Total overspend: ', over_total
+    write(*, '(a, i3, a, f12.2)') 'Underspend groups: ', under_count, ' | Total underspend: ', under_total
+    write(*, '(a, i3)') 'Even groups: ', even_count
+    write(*, '(a)') ''
+
     call sort_variances(variance_list, variance_count)
     call print_top_variances(variance_list, variance_count, threshold, amount_threshold, top_limit, 'all', &
                              'Top Variances')
@@ -247,6 +257,10 @@ contains
     write(*, '(a)') ''
     call print_top_variances(variance_list, variance_count, threshold, amount_threshold, top_limit, 'program', &
                              'Top Program Variances')
+    write(*, '(a)') ''
+    call print_top_direction(variance_list, variance_count, threshold, amount_threshold, 'over')
+    write(*, '(a)') ''
+    call print_top_direction(variance_list, variance_count, threshold, amount_threshold, 'under')
     write(*, '(a)') ''
 
     write(*, '(a)') 'Overall Totals'
@@ -306,6 +320,37 @@ contains
     end do
   end subroutine build_variance_list
 
+  subroutine summarize_direction(list, count, over_count, under_count, even_count, over_total, under_total)
+    type(variance_item), dimension(:), intent(in) :: list
+    integer, intent(in) :: count
+    integer, intent(out) :: over_count
+    integer, intent(out) :: under_count
+    integer, intent(out) :: even_count
+    real(real64), intent(out) :: over_total
+    real(real64), intent(out) :: under_total
+    real(real64) :: variance
+    integer :: i
+
+    over_count = 0
+    under_count = 0
+    even_count = 0
+    over_total = 0.0_real64
+    under_total = 0.0_real64
+
+    do i = 1, count
+      variance = list(i)%actual - list(i)%planned
+      if (variance > 0.0_real64) then
+        over_count = over_count + 1
+        over_total = over_total + variance
+      else if (variance < 0.0_real64) then
+        under_count = under_count + 1
+        under_total = under_total + abs(variance)
+      else
+        even_count = even_count + 1
+      end if
+    end do
+  end subroutine summarize_direction
+
   subroutine sort_variances(list, count)
     type(variance_item), dimension(:), intent(inout) :: list
     integer, intent(in) :: count
@@ -337,6 +382,72 @@ contains
       end do
     end do
   end subroutine sort_variances
+
+  subroutine build_direction_list(list, count, direction, out_list, out_count)
+    type(variance_item), dimension(:), intent(in) :: list
+    integer, intent(in) :: count
+    character(len=*), intent(in) :: direction
+    type(variance_item), dimension(:), intent(out) :: out_list
+    integer, intent(out) :: out_count
+    real(real64) :: variance
+    integer :: i
+
+    out_count = 0
+    do i = 1, count
+      variance = list(i)%actual - list(i)%planned
+      if (trim(direction) == 'over') then
+        if (variance > 0.0_real64) then
+          out_count = out_count + 1
+          out_list(out_count) = list(i)
+        end if
+      else if (trim(direction) == 'under') then
+        if (variance < 0.0_real64) then
+          out_count = out_count + 1
+          out_list(out_count) = list(i)
+        end if
+      end if
+    end do
+  end subroutine build_direction_list
+
+  subroutine sort_direction_variances(list, count, direction)
+    type(variance_item), dimension(:), intent(inout) :: list
+    integer, intent(in) :: count
+    character(len=*), intent(in) :: direction
+    integer :: i, j
+    type(variance_item) :: temp
+    real(real64) :: var_i, var_j
+    logical :: swap_needed
+
+    do i = 1, count - 1
+      do j = i + 1, count
+        var_i = list(i)%actual - list(i)%planned
+        var_j = list(j)%actual - list(j)%planned
+        if (trim(direction) == 'over') then
+          swap_needed = var_j > var_i
+        else
+          swap_needed = var_j < var_i
+        end if
+
+        if (swap_needed) then
+          temp = list(i)
+          list(i) = list(j)
+          list(j) = temp
+        else if (abs(var_j - var_i) < 0.000001_real64) then
+          if (trim(list(j)%group_type) < trim(list(i)%group_type)) then
+            temp = list(i)
+            list(i) = list(j)
+            list(j) = temp
+          else if (trim(list(j)%group_type) == trim(list(i)%group_type)) then
+            if (trim(list(j)%key) < trim(list(i)%key)) then
+              temp = list(i)
+              list(i) = list(j)
+              list(j) = temp
+            end if
+          end if
+        end if
+      end do
+    end do
+  end subroutine sort_direction_variances
 
   subroutine print_top_variances(list, count, threshold, amount_threshold, limit, filter_type, title)
     type(variance_item), dimension(:), intent(in) :: list
@@ -381,6 +492,58 @@ contains
       if (printed >= limit) exit
     end do
   end subroutine print_top_variances
+
+  subroutine print_top_direction(list, count, threshold, amount_threshold, direction)
+    type(variance_item), dimension(:), intent(in) :: list
+    integer, intent(in) :: count
+    real(real64), intent(in) :: threshold
+    real(real64), intent(in) :: amount_threshold
+    character(len=*), intent(in) :: direction
+    type(variance_item), dimension(max_items * 2) :: filtered
+    integer :: filtered_count
+    integer :: i
+    integer :: limit
+    real(real64) :: variance
+    real(real64) :: variance_pct
+    character(len=6) :: status
+
+    call build_direction_list(list, count, direction, filtered, filtered_count)
+    call sort_direction_variances(filtered, filtered_count, direction)
+
+    if (trim(direction) == 'over') then
+      write(*, '(a)') 'Top Overspends'
+    else
+      write(*, '(a)') 'Top Underspends'
+    end if
+    write(*, '(a)') 'Group | Key | Planned | Actual | Variance | Variance % | Status'
+
+    if (filtered_count == 0) then
+      write(*, '(a)') 'None'
+      return
+    end if
+
+    limit = filtered_count
+    if (limit > 3) limit = 3
+
+    do i = 1, limit
+      variance = filtered(i)%actual - filtered(i)%planned
+      if (filtered(i)%planned /= 0.0_real64) then
+        variance_pct = variance / filtered(i)%planned
+      else
+        variance_pct = 0.0_real64
+      end if
+
+      if (should_alert(variance, variance_pct, threshold, amount_threshold)) then
+        status = 'ALERT'
+      else
+        status = 'OK'
+      end if
+
+      write(*, '(a, " | ", a, " | ", f10.2, " | ", f10.2, " | ", f10.2, " | ", f10.3, " | ", a)') &
+        trim(filtered(i)%group_type), trim(filtered(i)%key), filtered(i)%planned, filtered(i)%actual, variance, variance_pct, &
+        trim(status)
+    end do
+  end subroutine print_top_direction
 
   subroutine print_summary_rows(list, count, threshold, amount_threshold)
     type(summary_item), dimension(:), intent(in) :: list
@@ -507,6 +670,7 @@ contains
     real(real64) :: variance
     real(real64) :: variance_pct
     character(len=6) :: status
+    character(len=5) :: direction
 
     variance = item%actual - item%planned
     if (item%planned /= 0.0_real64) then
@@ -521,11 +685,13 @@ contains
       status = 'OK'
     end if
 
-    write(unit, '(a)') 'INSERT INTO variances (run_id, group_type, group_key, planned_amount, actual_amount, variance_amount, variance_pct, status)'
+    direction = variance_direction(variance)
+    write(unit, '(a)') 'INSERT INTO variances (run_id, group_type, group_key, planned_amount, actual_amount, variance_amount, &
+      variance_pct, status, variance_direction)'
     write(unit, '(a)') 'VALUES (:id, ''' // trim(group_type) // ''', ''' // &
       trim(item%key) // ''', ' // trim(real_to_str(item%planned)) // ', ' // &
       trim(real_to_str(item%actual)) // ', ' // trim(real_to_str(variance)) // ', ' // &
-      trim(real_to_str(variance_pct)) // ', ''' // trim(status) // ''');'
+      trim(real_to_str(variance_pct)) // ', ''' // trim(status) // ''', ''' // trim(direction) // ''');'
   end subroutine write_variance_insert
 
   function real_to_str(value) result(out)
@@ -534,6 +700,19 @@ contains
     write(out, '(f12.6)') value
     out = adjustl(out)
   end function real_to_str
+
+  function variance_direction(variance) result(direction)
+    real(real64), intent(in) :: variance
+    character(len=5) :: direction
+
+    if (variance > 0.0_real64) then
+      direction = 'over'
+    else if (variance < 0.0_real64) then
+      direction = 'under'
+    else
+      direction = 'even'
+    end if
+  end function variance_direction
 
   logical function should_alert(variance, variance_pct, pct_threshold, amount_threshold)
     real(real64), intent(in) :: variance

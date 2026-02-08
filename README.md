@@ -6,7 +6,7 @@ Budget variance monitor is a Fortran CLI that compares planned vs. actual award 
 - CSV ingestion for planned vs. actual awards
 - Monthly and program-level aggregation
 - Variance percentage alerting with configurable threshold
-- Alert summary counts and top variance ranking by month and program
+- Alert summary counts, directional overspend/underspend summary, and top variance ranking by month and program
 - Optional production DB logging for run history and variance rows
 - Deterministic, testable output
 
@@ -37,7 +37,8 @@ bin/gs-budget-variance-monitor data/sample_awards.csv config/default.cfg
 - `top_variance_limit`: number of rows to show in each top-variance section
 
 ## Output
-The CLI prints monthly and program summaries, alert rollups, top-variance sections (overall, month, program), and overall totals.
+The CLI prints monthly and program summaries, alert rollups, direction summaries, top-variance sections (overall, month, program),
+top overspends/underspends, and overall totals.
 
 ## Database
 Schema and seed data are in `db/schema.sql` and `db/seed.sql`. Apply with:

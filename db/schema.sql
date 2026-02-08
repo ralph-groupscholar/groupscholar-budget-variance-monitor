@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS groupscholar_budget_variance_monitor.variances (
   variance_amount NUMERIC(14,2) NOT NULL,
   variance_pct NUMERIC(10,4) NOT NULL,
   status TEXT NOT NULL,
+  variance_direction TEXT NOT NULL CHECK (variance_direction IN ('over', 'under', 'even')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
